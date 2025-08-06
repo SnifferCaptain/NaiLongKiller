@@ -1,0 +1,5 @@
+images
+!build/helicopter_simplified.onnx
+!build/NLK-s_simplified.onnx
+.vscode
+build
