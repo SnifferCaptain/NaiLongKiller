@@ -3,3 +3,6 @@ images
 !build/NLK-s_simplified.onnx
 .vscode
 build
+windows/.vscode
+windows/.vs
+windows/x64
