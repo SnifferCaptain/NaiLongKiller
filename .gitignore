@@ -6,3 +6,9 @@ build
 windows/.vscode
 windows/.vs
 windows/x64
+deploy
+windows/webapi/.vscode
+windows/webapi/.vs
+windows/webapi/x64
+windows/webapi/x64
+windows_app_deploy.zip

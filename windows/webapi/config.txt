@@ -1,0 +1,5 @@
+./models/yvgg_simplified.onnx
+CPU
+0
+true
+1145
