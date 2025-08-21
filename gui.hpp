@@ -82,6 +82,8 @@ private:
     
     // 多线程解码 + 单线程推理
     std::atomic<bool> shouldStop;
+    std::atomic<bool> pause = false;
+    int bufferSize = 128; // 解码缓冲区大小
     std::queue<DecodedResult> decodedQueue;  // 解码完成的图片队列
     std::mutex queueMutex;
     std::vector<std::thread> decoderThreads;

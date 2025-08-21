@@ -68,7 +68,7 @@ YTensor<unsigned char, 3> InferenceWorker::loadImageToTensor(const QString& path
     
     QImage qimg(path);
     if (qimg.isNull()) {
-        return YTensor<unsigned char, 3>();
+        return YTensor<unsigned char, 3>(1, 1, 1);
     }
     
     return qImageToYTensor(qimg);
@@ -81,8 +81,12 @@ void InferenceWorker::decoderWorker(int startIndex, int endIndex) {
         
         if (tensor && tensor->data != nullptr) {
             // 使用lock_guard锁住队列，添加解码结果
+            while(pause){
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            }
             std::lock_guard<std::mutex> lock(queueMutex);
             decodedQueue.emplace(static_cast<int>(i), tensor);
+            pause = static_cast<int>(decodeQueue.size()) >= bufferSize;
         }
     }
 }
@@ -102,23 +106,39 @@ void InferenceWorker::inferenceLoop() {
                 batch.push_back(decodedQueue.front());
                 decodedQueue.pop();
             }
+            pause = false;
         }
         
         // 对每个解码好的图片进行推理
-        for (const auto& decoded : batch) {
-            if (shouldStop) break;
-            
-            float confidence = killer->infer(*decoded.tensor);
-            processedCount++;
-            
-            // 发出单个图片处理完成的信号
-            Q_EMIT imageProcessed(decoded.index, confidence);
-            
+        // for (const auto& decoded : batch) {
+        //     if (shouldStop) break;
+        //     float confidence = killer->infer(*decoded.tensor);
+        //     processedCount++;
+        //     // 发出单个图片处理完成的信号
+        //     Q_EMIT imageProcessed(decoded.index, confidence);
+        //     // 计算并发出进度更新信号
+        //     auto currentTime = std::chrono::high_resolution_clock::now();
+        //     auto elapsed = std::chrono::duration<float>(currentTime - startTime).count();
+        //     float speed = elapsed > 0 ? processedCount / elapsed : 0.0f;
+        //     Q_EMIT progressUpdated(processedCount, totalCount, speed);
+        // }
+        if(!shouldStop){
+            std::vector<YTensor<u_char, 3>> tensors;
+            tensors.reserve(batch.size());
+            for (int a = 0; a < batch.size(); a++) {
+                tensors.emplace_back((*batch[a].tensor).move());
+            }
+            auto confs = killer->infer(tensors, NLKiller::InferenceMode::ASYNC_MULTI);
+            processedCount += confs.size();
+			for (int a = 0; a < confs.size(); a++) {
+				// 发出单个图片处理完成的信号
+				Q_EMIT imageProcessed(batch[a].index, confs[a]);
+			}
             // 计算并发出进度更新信号
             auto currentTime = std::chrono::high_resolution_clock::now();
             auto elapsed = std::chrono::duration<float>(currentTime - startTime).count();
             float speed = elapsed > 0 ? processedCount / elapsed : 0.0f;
-            
+
             Q_EMIT progressUpdated(processedCount, totalCount, speed);
         }
         
@@ -148,7 +168,7 @@ void InferenceWorker::processImages() {
     }
     
     // 计算解码线程数量（逻辑核心数-2，最少1个）
-    int numDecoderThreads = std::max(1, (int)std::thread::hardware_concurrency() - 2);
+    int numDecoderThreads = std::max(1, static_cast<int>(std::thread::hardware_concurrency()) / 2 - 1);
     int imagesPerThread = (images->size() + numDecoderThreads - 1) / numDecoderThreads;
     
     // 启动解码线程，每个线程处理一段图片
@@ -195,6 +215,7 @@ NLKillerGUI::NLKillerGUI(QWidget *parent)
     
     // 初始化AI推理器
     killer = std::make_unique<NLKiller>(false);
+    killer->setNumThreads(4);
     
     // 设置UI
     setupUI();
@@ -500,6 +521,7 @@ void NLKillerGUI::batchInference() {
     
     batchInferenceBtn->setEnabled(false);
     batchInferenceBtn->setText("推理中...");
+    modelComboBox->setEnabled(false);
     
     // 显示进度条
     progressBar->setValue(0);
@@ -578,6 +600,7 @@ void NLKillerGUI::onAllImagesProcessed() {
     // 隐藏进度条
     progressBar->setVisible(false);
     speedLabel->setVisible(false);
+    modelComboBox->setEnabled(true);
     
     updateStatistics();
     QMessageBox::information(this, "完成", "批量推理完成！");
@@ -644,7 +667,7 @@ void NLKillerGUI::exportResults() {
     }
     
     QTextStream out(&file);
-    out << "文件路径,置信度,判定结果\n";
+    out << "file_path,score,result\n";
     
     for (const ImageInfo& info : images) {
         if (info.processed) {

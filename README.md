@@ -17,7 +17,7 @@
 
 ***判别结果由AI生成，请谨慎使用！***
 ## [*new🚀* WebAPI调用查杀模型](./windows/webapi/README.md)
-**使用http网络协议，跨语言调用查杀模型。**<br>
+***使用http网络协议，跨语言调用查杀模型。***<br>
 更适合开发者的方案，详情请打开对应文件查看。
 ## GUI编译环境依赖
 
@@ -53,6 +53,71 @@ mkdir build && cd build
 cmake ..
 make -j8
 ```
+### windows系统编译
+
+#### 环境要求
+- **操作系统**: Windows 10/11
+- **编译器**: Visual Studio 2022 或 CMake + MSVC
+- **依赖库**:
+  - Intel OpenVINO 2023.2.0+
+  - Qt5 (推荐 Qt 5.15.2)
+  - CMake 3.10+ (如使用CMake编译)
+
+#### 方法一：使用CMake编译（推荐）
+
+**1. 安装依赖**
+- 下载并安装 [Intel OpenVINO](https://docs.openvino.ai/)
+- 下载并安装 [Qt5](https://www.qt.io/download)
+- 下载并安装 [CMake](https://cmake.org/download/)
+
+**2. 设置环境变量**
+```cmd
+# 设置OpenVINO环境变量，不同安装方式的路径不一样，ov安装时的路径即可。
+set INTEL_OPENVINO_DIR=C:\Program Files (x86)\Intel\openvino_2025
+# 设置Qt5环境变量
+set Qt5_DIR=C:\Qt\5.15.2\msvc2019_64\lib\cmake\Qt5
+```
+
+**3. 编译**
+```cmd
+# 在项目根目录下执行
+mkdir build && cd build
+cmake .. -G "Visual Studio 17 2022"
+cmake --build . --config Release
+```
+
+#### 方法二：使用Visual Studio 2022解决方案
+
+项目提供了预配置的VS2022解决方案文件，位于 `./windows/` 目录下。
+
+**1. 打开解决方案**
+```
+./windows/windows.sln
+```
+
+**2. 配置OpenVINO路径**
+
+在Visual Studio中右键项目 → 属性 → 配置属性，设置以下路径：
+
+**包含目录 (Include Directories)**：
+```
+C:\Program Files (x86)\Intel\openvino_2025\runtime\include
+```
+
+**库目录 (Library Directories)**：
+```
+C:\Program Files (x86)\Intel\openvino_2025\runtime\lib\intel64\Release
+```
+
+**链接器 → 附加依赖项**：
+```
+openvino.lib
+```
+
+**3. 编译项目**
+- 选择 Release x64 配置
+- 编译完成后，可执行文件位于 `./windows/x64/Release/` 目录，文件名为windows.exe
+
 
 ## 如何操作
 
@@ -202,3 +267,20 @@ enum class DeviceType {
         self.gaussian_noise = 0.1       # 高斯噪声方差 [0-1]，添加到图像的噪声强度
         self.gaussian_noise_prob = 0.7  # 高斯噪声应用概率 [0-1]，控制是否应用噪声
 ```
+
+## 更新日志
+- 2025.8.21 <br>
+    * 完善README
+    * 修复批量推理后更换文件夹有概率造成的闪退问题。
+    * 优化CPU资源分配，优化缓冲区，批量推理时内存占用大幅减少。
+    * 修复异步推理在线程数不足时造成的闪退问题。
+    * 更改GUI的批量推理后端为异步推理（原为同步单线程，计划将改为批量推理以增加数据吞吐量）
+    * 修复windows平台下导出csv的乱码问题。
+- 2025.8.20 <br>
+    * 完善README
+    * 更新了yvgg模型，提高准确率。
+    * 添加webapi调用方式，使用http协议通信实现跨语言调用。
+- 2025.8.11 <br>
+    * 添加了windows的部署代码
+    * 更新了NLK-s模型，提高准确率与鲁棒性。
+- 2025.8.6 首次更新

@@ -2,6 +2,7 @@
 #include <iostream>
 #include <algorithm>
 #include <execution>
+#include <atomic>
 
 NLKiller::NLKiller(bool verbose, int num_threads) 
     : device_type(DeviceType::CPU), gpu_id(0), model_loaded(false), supports_f16(false), 
@@ -267,14 +268,11 @@ std::vector<float> NLKiller::inferSync(std::vector<YTensor<u_char, 3>>& images) 
     return results;
 }
 
-
-
 std::vector<float> NLKiller::inferAsync(std::vector<YTensor<u_char, 3>>& images) {
     last_run_info.inference_mode = getModeString(InferenceMode::ASYNC_MULTI);
     last_run_info.device = getDeviceString();
     
     std::vector<float> results(images.size());
-    std::vector<std::future<std::pair<float, double>>> futures;
     
     // 设置线程数
     int actual_threads = num_threads;
@@ -290,68 +288,67 @@ std::vector<float> NLKiller::inferAsync(std::vector<YTensor<u_char, 3>>& images)
         async_requests.push_back(compiled_model.create_infer_request());
     }
     
-    // 创建异步任务
-    for (size_t i = 0; i < images.size(); ++i) {
-        int request_idx = i % actual_threads;
-        
-        auto future = std::async(std::launch::async, [this, &images, &async_requests, i, request_idx]() -> std::pair<float, double> {
-            auto& image = images[i];
-            auto& request = async_requests[request_idx];
+    // 使用线程池方式处理图片
+    std::atomic<size_t> image_index(0);
+    std::vector<std::future<void>> futures;
+    
+    for (int t = 0; t < actual_threads; ++t) {
+        auto future = std::async(std::launch::async, [this, &images, &async_requests, &results, &image_index, t]() {
+            auto& request = async_requests[t];
+            size_t current_index;
             
-            // 准备输入张量
-            int height = image.shape(0);
-            int width = image.shape(1);
-            int channels = image.shape(2);
-            
-            ov::Shape input_shape = {1, static_cast<size_t>(channels), static_cast<size_t>(height), static_cast<size_t>(width)};
-            
-            ov::Tensor input_tensor;
-            if (is_input_f16) {
-                input_tensor = ov::Tensor(ov::element::f16, input_shape);
-                ov::float16* input_data = input_tensor.data<ov::float16>();
-                preprocessImageF16(image, input_data, 0);
-            } else {
-                input_tensor = ov::Tensor(ov::element::f32, input_shape);
-                float* input_data = input_tensor.data<float>();
-                preprocessImageF32(image, input_data, 0);
+            while ((current_index = image_index.fetch_add(1)) < images.size()) {
+                auto& image = images[current_index];
+                
+                // 准备输入张量
+                int height = image.shape(0);
+                int width = image.shape(1);
+                int channels = image.shape(2);
+                
+                ov::Shape input_shape = {1, static_cast<size_t>(channels), static_cast<size_t>(height), static_cast<size_t>(width)};
+                
+                ov::Tensor input_tensor;
+                if (is_input_f16) {
+                    input_tensor = ov::Tensor(ov::element::f16, input_shape);
+                    ov::float16* input_data = input_tensor.data<ov::float16>();
+                    preprocessImageF16(image, input_data, 0);
+                } else {
+                    input_tensor = ov::Tensor(ov::element::f32, input_shape);
+                    float* input_data = input_tensor.data<float>();
+                    preprocessImageF32(image, input_data, 0);
+                }
+                
+                // 设置输入并推理（每个线程专用自己的request，无需加锁）
+                request.set_input_tensor(input_tensor);
+                
+                auto infer_start = std::chrono::high_resolution_clock::now();
+                request.infer();
+                auto infer_end = std::chrono::high_resolution_clock::now();
+                
+                // 获取输出
+                auto output_tensor = request.get_output_tensor();
+                const float* output_data = output_tensor.data<const float>();
+                
+                // 应用sigmoid并保存结果
+                results[current_index] = sigmoid(output_data[0]);
             }
-            
-            // 设置输入并推理
-            request.set_input_tensor(input_tensor);
-            
-            auto infer_start = std::chrono::high_resolution_clock::now();
-            request.infer();
-            auto infer_end = std::chrono::high_resolution_clock::now();
-            
-            double infer_time = std::chrono::duration<double>(infer_end - infer_start).count();
-            
-            // 获取输出
-            auto output_tensor = request.get_output_tensor();
-            const float* output_data = output_tensor.data<const float>();
-            
-            // 应用sigmoid
-            return std::make_pair(sigmoid(output_data[0]), infer_time);
         });
         
         futures.push_back(std::move(future));
     }
     
-    // 收集结果
-    double total_inference_time = 0.0;
-    for (size_t i = 0; i < futures.size(); ++i) {
-        auto result = futures[i].get();
-        results[i] = result.first;
-        total_inference_time += result.second;
+    // 等待所有线程完成
+    for (auto& future : futures) {
+        future.get();
     }
     
     last_run_info.results = results;
-    last_run_info.inference_time = total_inference_time / images.size(); // 毫秒转秒
-    last_run_info.avg_inference_time_per_image = last_run_info.inference_time / images.size(); // 异步推理的平均时间
+    // 由于并行执行，无法精确计算总推理时间，这里设置为0
+    last_run_info.inference_time = 0.0;
+    last_run_info.avg_inference_time_per_image = 0.0;
     
     return results;
 }
-
-
 
 std::vector<float> NLKiller::inferBatch(std::vector<YTensor<u_char, 3>>& images) {
     if (images.empty()) {
