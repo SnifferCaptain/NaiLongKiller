@@ -9,6 +9,7 @@
 #include <QStandardPaths>
 #include <QTextStream>
 #include <QDateTime>
+#include <qpainter.h>
 #include <algorithm>
 #include <cstring>
 #include <chrono>
@@ -21,7 +22,7 @@
 YTensor<u_char, 3> qImageToYTensor(const QImage& qimg) {
     // 确保图像是RGB格式
     QImage rgbImage = qimg.convertToFormat(QImage::Format_RGB888);
-    
+
     int height = rgbImage.height();
     int width = rgbImage.width();
     int channels = 3;
@@ -62,7 +63,7 @@ InferenceWorker::~InferenceWorker() {
     decoderThreads.clear();
 }
 
-YTensor<unsigned char, 3> InferenceWorker::loadImageToTensor(const QString& path) {
+YTensor<unsigned char, 3> InferenceWorker::loadImageToTensor(const QString& path, int target_width, int target_height) {
     // 禁用Qt的ICC警告
     qputenv("QT_LOGGING_RULES", "qt.gui.icc.debug=false");
     
@@ -70,8 +71,19 @@ YTensor<unsigned char, 3> InferenceWorker::loadImageToTensor(const QString& path
     if (qimg.isNull()) {
         return YTensor<unsigned char, 3>(1,1,1);
     }
-    
-    return qImageToYTensor(qimg);
+    // 将图片在多线程环境下转换为target width/height
+    qimg = qimg.scaled(
+        QSize(target_width, target_height),
+        Qt::KeepAspectRatio, Qt::FastTransformation
+    );
+	QImage canvas = QImage(target_width, target_height, QImage::Format_RGB888);
+    canvas.fill(Qt::black); // 填充白色背景
+	int x0 = (target_width - qimg.width()) / 2;
+	int y0 = (target_height - qimg.height()) / 2;
+	QPainter painter(&canvas);
+	painter.drawImage(x0, y0, qimg);
+
+    return qImageToYTensor(canvas);
 }
 
 void InferenceWorker::decoderWorker(int startIndex, int endIndex) {

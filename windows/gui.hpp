@@ -56,7 +56,7 @@ public:
     InferenceWorker(NLKiller* killer, std::vector<ImageInfo>* images);
     ~InferenceWorker();
     
-    static YTensor<unsigned char, 3> loadImageToTensor(const QString& path);
+    static YTensor<unsigned char, 3> loadImageToTensor(const QString& path, int target_width = 128, int target_height = 128);
     
 public slots:
     void processImages();
